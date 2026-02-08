@@ -128,13 +128,21 @@ function buildVolumeMounts(
   });
 
   // Environment file directory (keeps credentials out of process listings)
-  // Only expose specific auth variables needed by Claude Code, not the entire .env
+  // Only expose specific auth variables needed by Azure OpenAI, not the entire .env
   const envDir = path.join(DATA_DIR, 'env');
   fs.mkdirSync(envDir, { recursive: true });
   const envFile = path.join(projectRoot, '.env');
   if (fs.existsSync(envFile)) {
     const envContent = fs.readFileSync(envFile, 'utf-8');
-    const allowedVars = ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY'];
+    const allowedVars = [
+      'AZURE_ENDPOINT',
+      'AZURE_API_KEY',
+      'AZURE_API_VERSION',
+      'AZURE_DEPLOYMENT_NAME',
+      'TEMPERATURE',
+      'GOOGLE_API_KEY',
+      'GOOGLE_SEARCH_ENGINE_ID',
+    ];
     const filteredLines = envContent.split('\n').filter((line) => {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith('#')) return false;
