@@ -1,8 +1,24 @@
 import path from 'path';
 
-export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || 'Andy';
+export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || 'Jarvis';
 export const POLL_INTERVAL = 2000;
 export const SCHEDULER_POLL_INTERVAL = 60000;
+
+// Telegram Configuration
+export const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || '';
+export const TELEGRAM_WHITELIST = process.env.WHITE_LIST
+  ? process.env.WHITE_LIST.split(',').map((id) => parseInt(id.trim(), 10))
+  : [];
+
+// Azure OpenAI Configuration
+export const AZURE_ENDPOINT = process.env.AZURE_ENDPOINT || '';
+export const AZURE_API_KEY = process.env.AZURE_API_KEY || '';
+export const AZURE_API_VERSION = process.env.AZURE_API_VERSION || '2024-12-01-preview';
+export const AZURE_DEPLOYMENT_NAME = process.env.AZURE_DEPLOYMENT_NAME || '';
+
+// Optional Tool Configuration
+export const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY || '';
+export const GOOGLE_SEARCH_ENGINE_ID = process.env.GOOGLE_SEARCH_ENGINE_ID || '';
 
 // Absolute paths needed for container mounts
 const PROJECT_ROOT = process.cwd();
