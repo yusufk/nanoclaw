@@ -1,6 +1,5 @@
-import dotenv from 'dotenv';
-dotenv.config();
-
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
 import { exec, execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
@@ -70,28 +69,8 @@ let groupSyncTimerStarted = false;
 
 const queue = new GroupQueue();
 
-/**
- * Translate a JID from LID format to phone format if we have a mapping.
- * Returns the original JID if no mapping exists.
- */
-function translateJid(jid: string): string {
-  if (!jid.endsWith('@lid')) return jid;
-  const lidUser = jid.split('@')[0].split(':')[0];
-  const phoneJid = lidToPhoneMap[lidUser];
-  if (phoneJid) {
-    logger.debug({ lidJid: jid, phoneJid }, 'Translated LID to phone JID');
-    return phoneJid;
-  }
-  return jid;
-}
-
-async function setTyping(jid: string, isTyping: boolean): Promise<void> {
-  try {
-    await sock.sendPresenceUpdate(isTyping ? 'composing' : 'paused', jid);
-  } catch (err) {
-    logger.debug({ jid, err }, 'Failed to update typing status');
-  }
-}
+// Telegram uses numeric chat IDs, stored as strings for database compatibility
+// No translation or typing indicators needed for Telegram
 
 function loadState(): void {
   // Load from SQLite (migration from JSON happens in initDatabase)
@@ -221,9 +200,7 @@ async function processGroupMessages(chatJid: string): Promise<boolean> {
     'Processing messages',
   );
 
-  await setTyping(chatJid, true);
   const response = await runAgent(group, prompt, chatJid);
-  await setTyping(chatJid, false);
 
   if (response === 'error') {
     // Container or agent error — signal failure so queue can retry with backoff

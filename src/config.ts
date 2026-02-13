@@ -1,4 +1,12 @@
 import path from 'path';
+import dotenv from 'dotenv';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+// Load .env BEFORE reading any process.env values
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+dotenv.config({ path: join(__dirname, '..', '.env') });
 
 export const ASSISTANT_NAME = process.env.ASSISTANT_NAME || 'Jarvis';
 export const POLL_INTERVAL = 2000;

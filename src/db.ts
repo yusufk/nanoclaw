@@ -2,8 +2,6 @@ import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
 
-import { proto } from '@whiskeysockets/baileys';
-
 import { DATA_DIR, STORE_DIR } from './config.js';
 import { NewMessage, RegisteredGroup, ScheduledTask, TaskRunLog } from './types.js';
 
@@ -204,7 +202,7 @@ export function setLastGroupSync(): void {
  * Only call this for registered groups where message history is needed.
  */
 export function storeMessage(
-  msg: proto.IWebMessageInfo,
+  msg: any, // Generic message object from Telegram or WhatsApp
   chatJid: string,
   isFromMe: boolean,
   pushName?: string,
