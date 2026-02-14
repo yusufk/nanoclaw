@@ -120,8 +120,7 @@ async function main(): Promise<void> {
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt }
       ],
-      temperature: parseFloat(process.env.TEMPERATURE || '0.7'),
-      max_tokens: 4000
+      max_completion_tokens: 4000
     });
     
     const assistantMessage = completion.choices[0]?.message?.content || 'No response';
