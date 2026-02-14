@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  My personal AI assistant that runs securely with process isolation. Lightweight and built to be understood and customized for your own needs.
+  My personal AI assistant with configurable security isolation. Choose between Docker containers for OS-level sandboxing or simple processes for lightweight deployment.
 </p>
 
 ## Why I Built This
@@ -35,7 +35,7 @@ npm start
 
 **Small enough to understand.** One process, a few source files. No microservices, no message queues, no abstraction layers. Have Claude Code walk you through it.
 
-**Secure by isolation.** Agents run in child processes with separate execution contexts. They can only see what's explicitly made available. The system is designed for personal use with process-level isolation.
+**Secure by isolation.** Choose your security model: Docker containers for OS-level isolation with filesystem sandboxing, or child processes for simpler deployment. Agents only see what you explicitly expose.
 
 **Built for one user.** This isn't a framework. It's working software that fits my exact needs. You fork it and customize it to match your exact needs.
 
@@ -55,7 +55,9 @@ npm start
 - **Botmaster authorization** - Single user ID controls access
 - **Scheduled tasks** - Recurring jobs that run the agent and can message you back
 - **Web access** - Search and fetch content (via integrations)
-- **Process isolation** - Agents run in separate Node.js processes with controlled access
+- **Dual execution modes**:
+  - **Docker mode** - Full OS-level isolation, filesystem sandboxing, runs as unprivileged user
+  - **Process mode** - Lightweight child processes, simpler deployment, faster startup
 - **Optional integrations** - Add capabilities via skills
 
 ## Usage
@@ -118,22 +120,82 @@ Skills we'd love to see:
 - Node.js 20+
 - Telegram bot token (from [@BotFather](https://t.me/botfather))
 - Azure OpenAI API access (or adapt to another AI provider)
+- **Docker/Rancher Desktop** (optional, only if using `AGENT_EXECUTION_MODE=docker`)
+
+## Execution Modes
+
+NanoClaw supports two execution modes for running agents:
+
+### Docker Mode (Recommended for Security)
+
+Agents run in isolated Docker containers:
+- ✅ **OS-level isolation** - Separate namespaces, cgroups, filesystem
+- ✅ **Filesystem sandboxing** - Only mounted directories are accessible
+- ✅ **Unprivileged user** - Container runs as non-root user
+- ✅ **Resource limits** - Memory and CPU constraints
+- ✅ **Network isolation** - No network access by default
+- ⚠️ Requires Docker or Rancher Desktop installed
+- ⚠️ Slightly slower startup (container spawn overhead)
+
+**Setup:**
+```bash
+# Build the container image
+cd container
+./build.sh
+cd ..
+
+# Set in .env:
+AGENT_EXECUTION_MODE=docker
+CONTAINER_IMAGE=nanoclaw-agent:latest
+```
+
+### Process Mode (Simpler Deployment)
+
+Agents run as Node.js child processes:
+- ✅ **Fast startup** - No container overhead
+- ✅ **Simple deployment** - No Docker required
+- ✅ **Easy debugging** - Direct process inspection
+- ⚠️ **No OS-level isolation** - Agent runs with your user permissions
+- ⚠️ **Full filesystem access** - Agent can read any file you can
+- ⚠️ **Shared system resources** - No hard resource limits
+
+**Setup:**
+```bash
+# Just build the agent runner
+cd container/agent-runner
+npm install
+npm run build
+cd ../..
+
+# Set in .env:
+AGENT_EXECUTION_MODE=process
+```
+
+**Which mode should I use?**
+- Use **Docker mode** if you want maximum security isolation
+- Use **process mode** for simpler setup or if Docker isn't available
+- You can switch modes anytime by changing `AGENT_EXECUTION_MODE` in `.env`
 
 ## Architecture
 
 ```
-Telegram Bot API → SQLite → Polling loop → Agent Process (Azure OpenAI o4-mini) → Response
+Telegram Bot API → SQLite → Polling loop → Agent (Azure OpenAI o4-mini) → Response
+                                          ↓
+                                    Docker Container (secure)
+                                        OR
+                                    Child Process (simple)
 ```
 
-Single Node.js process for routing. Agent executes in isolated child processes with controlled environment. IPC via filesystem. No daemons, no queues, no complexity.
+Single Node.js process for routing. Agent executes in Docker containers (secure isolation) or child processes (simple deployment). IPC via filesystem. No daemons, no queues, no complexity.
 
 Key files:
 - `src/index.ts` - Main app: Telegram connection, routing, IPC
 - `src/telegram-bot.ts` - Telegram bot lifecycle and authorization
-- `src/container-runner.ts` - Spawns agent child processes
+- `src/container-runner.ts` - Spawns agents in Docker or process mode
 - `src/task-scheduler.ts` - Runs scheduled tasks
 - `src/db.ts` - SQLite operations
 - `container/agent-runner/src/index.ts` - Azure OpenAI agent logic
+- `container/Dockerfile` - Docker container definition (for Docker mode)
 - `groups/*/CLAUDE.md` - Per-group memory
 
 ## FAQ
@@ -144,11 +206,16 @@ Because the current implementation uses Telegram. The codebase is small enough t
 
 **Can I run this on Linux?**
 
-Yes. The architecture is platform-agnostic. Process-based execution works on both macOS and Linux.
+Yes. The architecture is platform-agnostic. Both Docker and process modes work on macOS and Linux.
 
 **Is this secure?**
 
-Agents run in separate Node.js processes with controlled environment access, not behind application-level permission checks. The botmaster authorization model ensures only you can interact with the bot. You should still review what you're running, but the codebase is small enough that you actually can. See [docs/SECURITY.md](docs/SECURITY.md) for the full security model.
+It depends on your execution mode:
+
+- **Docker mode**: Agents run in isolated containers with filesystem sandboxing, resource limits, and no network access. Only explicitly mounted directories are accessible.
+- **Process mode**: Agents run as child processes with your user's permissions. They have full filesystem access and no OS-level isolation.
+
+The botmaster authorization model ensures only you can interact with the bot. You should still review what you're running, but the codebase is small enough that you actually can. See [docs/SECURITY.md](docs/SECURITY.md) for the full security model.
 
 **Why no configuration files?**
 
@@ -156,7 +223,7 @@ We don't want configuration sprawl. Every user should customize it to so that th
 
 **How do I debug issues?**
 
-Check the logs in `groups/{name}/logs/` for agent execution details. The codebase is small enough to trace through. Set `LOG_LEVEL=debug` in [.env](.env) for verbose output.
+Check the logs in `groups/{name}/logs/` for agent execution details. Use `/debug` command in Telegram to see system diagnostics. The codebase is small enough to trace through. Set `LOG_LEVEL=debug` in [.env](.env) for verbose output.
 
 **Why isn't the setup working for me?**
 

@@ -1,0 +1,18 @@
+# Node modules (will be installed in container)
+agent-runner/node_modules
+
+# TypeScript source (only dist is needed)
+agent-runner/src
+agent-runner/tsconfig.json
+
+# Development files
+agent-runner/.env
+agent-runner/.env.*
+agent-runner/*.log
+
+# Git
+.git
+.gitignore
+
+# Documentation
+*.md

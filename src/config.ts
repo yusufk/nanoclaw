@@ -24,6 +24,9 @@ export const AZURE_API_KEY = process.env.AZURE_API_KEY || '';
 export const AZURE_API_VERSION = process.env.AZURE_API_VERSION || '2024-12-01-preview';
 export const AZURE_DEPLOYMENT_NAME = process.env.AZURE_DEPLOYMENT_NAME || '';
 
+// Agent Execution Mode: 'docker' for container isolation, 'process' for simpler deployment
+export const AGENT_EXECUTION_MODE = (process.env.AGENT_EXECUTION_MODE || 'process') as 'docker' | 'process';
+
 // Optional Tool Configuration
 export const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY || '';
 export const GOOGLE_SEARCH_ENGINE_ID = process.env.GOOGLE_SEARCH_ENGINE_ID || '';
