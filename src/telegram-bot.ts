@@ -3,8 +3,11 @@
  * Manages Telegram bot lifecycle, message handling, and group tracking
  */
 import TelegramBot from 'node-telegram-bot-api';
-import { ASSISTANT_NAME, TELEGRAM_TOKEN, BOTMASTER_ID } from './config.js';
+import fs from 'fs';
+import path from 'path';
+import { ASSISTANT_NAME, TELEGRAM_TOKEN, BOTMASTER_ID, DATA_DIR, GROUPS_DIR } from './config.js';
 import { logger } from './logger.js';
+import { getAllRegisteredGroups, getAllTasks } from './db.js';
 
 let bot: TelegramBot | null = null;
 
@@ -196,6 +199,65 @@ Bot is running and ready to assist.
 - Chat Type: ${msg.chat.type}`;
 
     await bot?.sendMessage(msg.chat.id, status, { parse_mode: 'Markdown' });
+  });
+
+  bot.onText(/\/debug/, async (msg) => {
+    if (!isBotmaster(msg.from?.id || 0)) return;
+
+    try {
+      const groups = getAllRegisteredGroups();
+      const tasks = getAllTasks();
+      const activeTasks = tasks.filter(t => t.status === 'active').length;
+      
+      // Get recent log files
+      const mainLogsDir = path.join(GROUPS_DIR, 'main', 'logs');
+      let recentLogs = 'None';
+      if (fs.existsSync(mainLogsDir)) {
+        const logFiles = fs.readdirSync(mainLogsDir)
+          .filter(f => f.startsWith('agent-'))
+          .sort()
+          .slice(-3);
+        if (logFiles.length > 0) {
+          recentLogs = logFiles.join('\\n- ');
+        }
+      }
+
+      // Check agent runner
+      const agentPath = path.join(process.cwd(), 'container/agent-runner/dist/index.js');
+      const agentExists = fs.existsSync(agentPath);
+
+      const debug = `🔍 **Debug Information**
+
+**Groups:**
+- Registered: ${Object.keys(groups).length}
+- Main group: ${groups[Object.keys(groups).find(jid => groups[jid].folder === 'main') || ''] ? '✅' : '❌'}
+
+**Tasks:**
+- Total: ${tasks.length}
+- Active: ${activeTasks}
+- Paused: ${tasks.filter(t => t.status === 'paused').length}
+
+**Agent:**
+- Runner compiled: ${agentExists ? '✅' : '❌'}
+- Path: \`${agentPath}\`
+
+**Recent Logs:**
+- ${recentLogs}
+
+**Directories:**
+- Data: \`${DATA_DIR}\`
+- Groups: \`${GROUPS_DIR}\`
+
+**Process:**
+- PID: ${process.pid}
+- Uptime: ${Math.floor(process.uptime())} seconds
+- Memory: ${Math.round(process.memoryUsage().heapUsed / 1024 / 1024)} MB`;
+
+      await bot?.sendMessage(msg.chat.id, debug, { parse_mode: 'Markdown' });
+    } catch (err) {
+      logger.error({ err }, 'Error generating debug info');
+      await bot?.sendMessage(msg.chat.id, `❌ Error generating debug info: ${err instanceof Error ? err.message : String(err)}`);
+    }
   });
 
   // Error handling

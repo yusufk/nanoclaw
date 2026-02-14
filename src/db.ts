@@ -202,7 +202,7 @@ export function setLastGroupSync(): void {
  * Only call this for registered groups where message history is needed.
  */
 export function storeMessage(
-  msg: any, // Generic message object from Telegram or WhatsApp
+  msg: any, // Generic message object from Telegram
   chatJid: string,
   isFromMe: boolean,
   pushName?: string,

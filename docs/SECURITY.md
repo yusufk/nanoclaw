@@ -4,48 +4,39 @@
 
 | Entity | Trust Level | Rationale |
 |--------|-------------|-----------|
-| Main group | Trusted | Private self-chat, admin control |
-| Non-main groups | Untrusted | Other users may be malicious |
-| Container agents | Sandboxed | Isolated execution environment |
-| WhatsApp messages | User input | Potential prompt injection |
+| Botmaster | Trusted | Single authorized Telegram user ID |
+| Other Telegram users | Blocked | Bot only responds to botmaster |
+| Agent processes | Controlled | Isolated child processes with environment control |
+| Telegram messages | User input | Potential prompt injection from botmaster |
 
 ## Security Boundaries
 
-### 1. Container Isolation (Primary Boundary)
+### 1. Botmaster Authorization (Primary Boundary)
 
-Agents execute in Apple Container (lightweight Linux VMs), providing:
-- **Process isolation** - Container processes cannot affect the host
-- **Filesystem isolation** - Only explicitly mounted directories are visible
-- **Non-root execution** - Runs as unprivileged `node` user (uid 1000)
-- **Ephemeral containers** - Fresh environment per invocation (`--rm`)
+The bot uses **single-user authorization** via `BOTMASTER_ID`:
+- Only the configured Telegram user ID can interact with the bot
+- All messages from other users are silently ignored
+- No whitelist management - one trusted user only
+- Authorization checked in [src/telegram-bot.ts](../src/telegram-bot.ts) via `isBotmaster()` function
 
-This is the primary security boundary. Rather than relying on application-level permission checks, the attack surface is limited by what's mounted.
+This is the primary security boundary. The system is designed for personal use by a single trusted individual.
 
-### 2. Mount Security
+### 2. Process Isolation
 
-**External Allowlist** - Mount permissions stored at `~/.config/nanoclaw/mount-allowlist.json`, which is:
-- Outside project root
-- Never mounted into containers
-- Cannot be modified by agents
-
-**Default Blocked Patterns:**
-```
-.ssh, .gnupg, .aws, .azure, .gcloud, .kube, .docker,
-credentials, .env, .netrc, .npmrc, id_rsa, id_ed25519,
-private_key, .secret
-```
-
-**Protections:**
-- Symlink resolution before validation (prevents traversal attacks)
-- Container path validation (rejects `..` and absolute paths)
-- `nonMainReadOnly` option forces read-only for non-main groups
+Agents execute in separate Node.js child processes spawned via [src/container-runner.ts](../src/container-runner.ts):
+- **Process separation** - Agent runs in isolated child process
+- **Controlled environment** - Only specified env vars passed to agent
+- **Working directory isolation** - Each group has separate working directory
+- **No shared memory** - Separate process memory space
+- **Single-use execution** - Fresh process per agent invocation
 
 ### 3. Session Isolation
 
-Each group has isolated Claude sessions at `data/sessions/{group}/.claude/`:
+Each group has isolated session data at `data/sessions/{group}/.claude/`:
 - Groups cannot see other groups' conversation history
-- Session data includes full message history and file contents read
+- Session IDs are group-specific
 - Prevents cross-group information disclosure
+- Main group has separate session from other groups
 
 ### 4. IPC Authorization
 
@@ -62,58 +53,66 @@ Messages and task operations are verified against group identity:
 
 ### 5. Credential Handling
 
-**Mounted Credentials:**
-- Claude auth tokens (filtered from `.env`, read-only)
+**Environment Variables Passed to Agent:**
+- Azure OpenAI credentials (`AZURE_ENDPOINT`, `AZURE_API_KEY`, `AZURE_DEPLOYMENT_NAME`)
+- Optional API keys (`GOOGLE_API_KEY`, `GOOGLE_SEARCH_ENGINE_ID`)
+- Temperature and other model parameters
 
-**NOT Mounted:**
-- WhatsApp session (`store/auth/`) - host only
-- Mount allowlist - external, never mounted
-- Any credentials matching blocked patterns
+**NOT Exposed to Agent:**
+- Telegram bot token (`TELEGRAM_TOKEN`) - routing layer only
+- Botmaster ID (`BOTMASTER_ID`) - routing layer only
+- Database files - host process only
+- Other users' session data
 
-**Credential Filtering:**
-Only these environment variables are exposed to containers:
+**Credential Filtering in [container/agent-runner/src/index.ts](../container/agent-runner/src/index.ts):**
 ```typescript
-const allowedVars = ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY'];
+const allowedVars = [
+  'AZURE_ENDPOINT',
+  'AZURE_API_KEY',
+  'AZURE_API_VERSION',
+  'AZURE_DEPLOYMENT_NAME',
+  'TEMPERATURE',
+  'GOOGLE_API_KEY',
+  'GOOGLE_SEARCH_ENGINE_ID',
+];
 ```
-
-> **Note:** Anthropic credentials are mounted so that Claude Code can authenticate when the agent runs. However, this means the agent itself can discover these credentials via Bash or file operations. Ideally, Claude Code would authenticate without exposing credentials to the agent's execution environment, but I couldn't figure this out. **PRs welcome** if you have ideas for credential isolation.
 
 ## Privilege Comparison
 
 | Capability | Main Group | Non-Main Group |
 |------------|------------|----------------|
-| Project root access | `/workspace/project` (rw) | None |
-| Group folder | `/workspace/group` (rw) | `/workspace/group` (rw) |
-| Global memory | Implicit via project | `/workspace/global` (ro) |
-| Additional mounts | Configurable | Read-only unless allowed |
+| Working directory | `groups/main/` | `groups/{name}/` |
+| Session access | Own session only | Own session only |
+| IPC directory | `data/ipc/main/` | `data/ipc/{name}/` |
 | Network access | Unrestricted | Unrestricted |
-| MCP tools | All | All |
+| Azure OpenAI access | Yes | Yes |
 
 ## Security Architecture Diagram
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
 │                        UNTRUSTED ZONE                             │
-│  WhatsApp Messages (potentially malicious)                        │
+│  Telegram Messages (from botmaster - potential prompt injection)  │
 └────────────────────────────────┬─────────────────────────────────┘
                                  │
-                                 ▼ Trigger check, input escaping
+                                 ▼ Botmaster ID check
 ┌──────────────────────────────────────────────────────────────────┐
 │                     HOST PROCESS (TRUSTED)                        │
-│  • Message routing                                                │
+│  • Telegram bot connection (src/telegram-bot.ts)                  │
+│  • Message routing (src/index.ts)                                 │
 │  • IPC authorization                                              │
-│  • Mount validation (external allowlist)                          │
-│  • Container lifecycle                                            │
+│  • Database operations (src/db.ts)                                │
 │  • Credential filtering                                           │
 └────────────────────────────────┬─────────────────────────────────┘
                                  │
-                                 ▼ Explicit mounts only
+                                 ▼ spawn() with controlled env
 ┌──────────────────────────────────────────────────────────────────┐
-│                CONTAINER (ISOLATED/SANDBOXED)                     │
-│  • Agent execution                                                │
-│  • Bash commands (sandboxed)                                      │
-│  • File operations (limited to mounts)                            │
-│  • Network access (unrestricted)                                  │
+│                 AGENT PROCESS (ISOLATED)                          │
+│  • Azure OpenAI calls (container/agent-runner/src/index.ts)       │
+│  • Group-specific working directory                               │
+│  • Filtered environment variables                                 │
+│  • Separate memory space                                          │
+│  • Cannot access Telegram bot token                               │
 │  • Cannot modify security config                                  │
 └──────────────────────────────────────────────────────────────────┘
 ```

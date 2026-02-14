@@ -3,50 +3,60 @@
 </p>
 
 <p align="center">
-  My personal Claude assistant that runs securely in containers. Lightweight and built to be understood and customized for your own needs.
+  My personal AI assistant that runs securely with process isolation. Lightweight and built to be understood and customized for your own needs.
 </p>
 
 ## Why I Built This
 
 [OpenClaw](https://github.com/openclaw/openclaw) is an impressive project with a great vision. But I can't sleep well running software I don't understand with access to my life. OpenClaw has 52+ modules, 8 config management files, 45+ dependencies, and abstractions for 15 channel providers. Security is application-level (allowlists, pairing codes) rather than OS isolation. Everything runs in one Node process with shared memory.
 
-NanoClaw gives you the same core functionality in a codebase you can understand in 8 minutes. One process. A handful of files. Agents run in actual Linux containers with filesystem isolation, not behind permission checks.
+NanoClaw gives you the same core functionality in a codebase you can understand in 8 minutes. One process. A handful of files. Agents run in isolated child processes with controlled filesystem access, not behind permission checks.
 
 ## Quick Start
 
 ```bash
 git clone https://github.com/gavrielc/nanoclaw.git
 cd nanoclaw
-claude
+npm install
+cd container/agent-runner && npm install && cd ../..
+cp .env.example .env
+# Edit .env with your credentials
+npm run build
+npm start
 ```
 
-Then run `/setup`. Claude Code handles everything: dependencies, authentication, container setup, service configuration.
+**Setup Requirements:**
+1. Create a Telegram bot via [@BotFather](https://t.me/botfather) and get your `TELEGRAM_TOKEN`
+2. Get your Telegram user ID as `BOTMASTER_ID` (message [@userinfobot](https://t.me/userinfobot))
+3. Configure Azure OpenAI credentials (`AZURE_ENDPOINT`, `AZURE_API_KEY`, `AZURE_DEPLOYMENT_NAME`)
+4. Set `ASSISTANT_NAME` to your preferred trigger word (default: Jarvis)
 
 ## Philosophy
 
 **Small enough to understand.** One process, a few source files. No microservices, no message queues, no abstraction layers. Have Claude Code walk you through it.
 
-**Secure by isolation.** Agents run in Linux containers (Apple Container on macOS, or Docker). They can only see what's explicitly mounted. Bash access is safe because commands run inside the container, not on your host.
+**Secure by isolation.** Agents run in child processes with separate execution contexts. They can only see what's explicitly made available. The system is designed for personal use with process-level isolation.
 
-**Built for one user.** This isn't a framework. It's working software that fits my exact needs. You fork it and have Claude Code make it match your exact needs.
+**Built for one user.** This isn't a framework. It's working software that fits my exact needs. You fork it and customize it to match your exact needs.
 
 **Customization = code changes.** No configuration sprawl. Want different behavior? Modify the code. The codebase is small enough that this is safe.
 
-**AI-native.** No installation wizard; Claude Code guides setup. No monitoring dashboard; ask Claude what's happening. No debugging tools; describe the problem, Claude fixes it.
+**AI-native.** No installation wizard; use AI assistance for setup. No monitoring dashboard; ask your AI what's happening. No debugging tools; describe the problem, get it fixed.
 
-**Skills over features.** Contributors shouldn't add features (e.g. support for Telegram) to the codebase. Instead, they contribute [claude code skills](https://code.claude.com/docs/en/skills) like `/add-telegram` that transform your fork. You end up with clean code that does exactly what you need.
+**Skills over features.** Contributors shouldn't add features (e.g. support for WhatsApp) to the codebase. Instead, they contribute skills that transform your fork. You end up with clean code that does exactly what you need.
 
-**Best harness, best model.** This runs on Claude Agent SDK, which means you're running Claude Code directly. The harness matters. A bad harness makes even smart models seem dumb, a good harness gives them superpowers. Claude Code is (IMO) the best harness available.
+**Flexible AI backend.** Currently runs on Azure OpenAI (o4-mini reasoning model), but designed to be adaptable to different AI providers and models.
 
 ## What It Supports
 
-- **WhatsApp I/O** - Message Claude from your phone
-- **Isolated group context** - Each group has its own `CLAUDE.md` memory, isolated filesystem, and runs in its own container sandbox with only that filesystem mounted
-- **Main channel** - Your private channel (self-chat) for admin control; every other group is completely isolated
-- **Scheduled tasks** - Recurring jobs that run Claude and can message you back
-- **Web access** - Search and fetch content
-- **Container isolation** - Agents sandboxed in Apple Container (macOS) or Docker (macOS/Linux)
-- **Optional integrations** - Add Gmail (`/add-gmail`) and more via skills
+- **Telegram I/O** - Message your assistant from your phone via Telegram
+- **Isolated group context** - Each group has its own `CLAUDE.md` memory with isolated execution
+- **Main channel** - Your private chat for admin control; every other group is isolated
+- **Botmaster authorization** - Single user ID controls access
+- **Scheduled tasks** - Recurring jobs that run the agent and can message you back
+- **Web access** - Search and fetch content (via integrations)
+- **Process isolation** - Agents run in separate Node.js processes with controlled access
+- **Optional integrations** - Add capabilities via skills
 
 ## Usage
 
@@ -58,88 +68,87 @@ Talk to your assistant with the trigger word (default: `@Jarvis`):
 @Jarvis every Monday at 8am, compile news on AI developments from Hacker News and TechCrunch and message me a briefing
 ```
 
-From the main channel (your self-chat), you can manage groups and tasks:
+From the main channel (your private chat), you can manage groups and tasks:
 ```
-@Andy list all scheduled tasks across groups
-@Andy pause the Monday briefing task
-@Andy join the Family Chat group
+@Jarvis list all scheduled tasks across groups
+@Jarvis pause the Monday briefing task
+@Jarvis join the Family Chat group
 ```
 
 ## Customizing
 
-There are no configuration files to learn. Just tell Claude Code what you want:
+There are no configuration files to learn. The codebase is small enough to modify directly:
 
-- "Change the trigger word to @Bob"
-- "Remember in the future to make responses shorter and more direct"
-- "Add a custom greeting when I say good morning"
-- "Store conversation summaries weekly"
+- Change the trigger word in [src/config.ts](src/config.ts)
+- Modify the system prompt in `groups/{name}/CLAUDE.md`
+- Adjust authorization logic in [src/telegram-bot.ts](src/telegram-bot.ts)
+- Add custom behaviors in [src/index.ts](src/index.ts)
 
-Or run `/customize` for guided changes.
+Or use the `/customize` skill for guided changes.
 
-The codebase is small enough that Claude can safely modify it.
+The codebase is small enough that direct modification is safe and encouraged.
 
 ## Contributing
 
 **Don't add features. Add skills.**
 
-If you want to add Telegram support, don't create a PR that adds Telegram alongside WhatsApp. Instead, contribute a skill file (`.claude/skills/add-telegram/SKILL.md`) that teaches Claude Code how to transform a NanoClaw installation to use Telegram.
+If you want to add WhatsApp support, don't create a PR that adds WhatsApp alongside Telegram. Instead, contribute a skill file (`.claude/skills/add-whatsapp/SKILL.md`) that teaches AI assistants how to transform a NanoClaw installation to use WhatsApp.
 
-Users then run `/add-telegram` on their fork and get clean code that does exactly what they need, not a bloated system trying to support every use case.
+Users then run the skill on their fork and get clean code that does exactly what they need, not a bloated system trying to support every use case.
 
 ### RFS (Request for Skills)
 
 Skills we'd love to see:
 
 **Communication Channels**
-- `/add-telegram` - Add Telegram as channel. Should give the user option to replace WhatsApp or add as additional channel. Also should be possible to add it as a control channel (where it can trigger actions) or just a channel that can be used in actions triggered elsewhere
+- `/add-whatsapp` - Add WhatsApp as channel. Should give the user option to replace Telegram or add as additional channel
 - `/add-slack` - Add Slack
 - `/add-discord` - Add Discord
 
 **Platform Support**
-- `/setup-windows` - Windows via WSL2 + Docker
+- `/setup-windows` - Windows via WSL2 support
 
-**Session Management**
-- `/add-clear` - Add a `/clear` command that compacts the conversation (summarizes context while preserving critical information in the same session). Requires figuring out how to trigger compaction programmatically via the Claude Agent SDK.
+**AI Backends**
+- `/add-claude` - Migrate from Azure OpenAI to Anthropic Claude
+- `/add-openai` - Migrate to standard OpenAI API
 
 ## Requirements
 
 - macOS or Linux
 - Node.js 20+
-- [Claude Code](https://claude.ai/download)
-- [Apple Container](https://github.com/apple/container) (macOS) or [Docker](https://docker.com/products/docker-desktop) (macOS/Linux)
+- Telegram bot token (from [@BotFather](https://t.me/botfather))
+- Azure OpenAI API access (or adapt to another AI provider)
 
 ## Architecture
 
 ```
-WhatsApp (baileys) --> SQLite --> Polling loop --> Container (Claude Agent SDK) --> Response
+Telegram Bot API → SQLite → Polling loop → Agent Process (Azure OpenAI o4-mini) → Response
 ```
 
-Single Node.js process. Agents execute in isolated Linux containers with mounted directories. IPC via filesystem. No daemons, no queues, no complexity.
+Single Node.js process for routing. Agent executes in isolated child processes with controlled environment. IPC via filesystem. No daemons, no queues, no complexity.
 
 Key files:
-- `src/index.ts` - Main app: WhatsApp connection, routing, IPC
-- `src/container-runner.ts` - Spawns agent containers
+- `src/index.ts` - Main app: Telegram connection, routing, IPC
+- `src/telegram-bot.ts` - Telegram bot lifecycle and authorization
+- `src/container-runner.ts` - Spawns agent child processes
 - `src/task-scheduler.ts` - Runs scheduled tasks
 - `src/db.ts` - SQLite operations
+- `container/agent-runner/src/index.ts` - Azure OpenAI agent logic
 - `groups/*/CLAUDE.md` - Per-group memory
 
 ## FAQ
 
-**Why WhatsApp and not Telegram/Signal/etc?**
+**Why Telegram and not WhatsApp/Signal/etc?**
 
-Because I use WhatsApp. Fork it and run a skill to change it. That's the whole point.
-
-**Why Apple Container instead of Docker?**
-
-On macOS, Apple Container is lightweight, fast, and optimized for Apple silicon. But Docker is also fully supported—during `/setup`, you can choose which runtime to use. On Linux, Docker is used automatically.
+Because the current implementation uses Telegram. The codebase is small enough to adapt to other platforms via skills. That's the whole point - fork and customize.
 
 **Can I run this on Linux?**
 
-Yes. Run `/setup` and it will automatically configure Docker as the container runtime. Thanks to [@dotsetgreg](https://github.com/dotsetgreg) for contributing the `/convert-to-docker` skill.
+Yes. The architecture is platform-agnostic. Process-based execution works on both macOS and Linux.
 
 **Is this secure?**
 
-Agents run in containers, not behind application-level permission checks. They can only access explicitly mounted directories. You should still review what you're running, but the codebase is small enough that you actually can. See [docs/SECURITY.md](docs/SECURITY.md) for the full security model.
+Agents run in separate Node.js processes with controlled environment access, not behind application-level permission checks. The botmaster authorization model ensures only you can interact with the bot. You should still review what you're running, but the codebase is small enough that you actually can. See [docs/SECURITY.md](docs/SECURITY.md) for the full security model.
 
 **Why no configuration files?**
 
@@ -147,11 +156,15 @@ We don't want configuration sprawl. Every user should customize it to so that th
 
 **How do I debug issues?**
 
-Ask Claude Code. "Why isn't the scheduler running?" "What's in the recent logs?" "Why did this message not get a response?" That's the AI-native approach.
+Check the logs in `groups/{name}/logs/` for agent execution details. The codebase is small enough to trace through. Set `LOG_LEVEL=debug` in [.env](.env) for verbose output.
 
 **Why isn't the setup working for me?**
 
-I don't know. Run `claude`, then run `/debug`. If claude finds an issue that is likely affecting other users, open a PR to modify the setup SKILL.md.
+Run `/debug` skill if available, or check the logs manually. For new installations, verify:
+- Telegram bot token is valid
+- BOTMASTER_ID matches your Telegram user ID  
+- Azure OpenAI credentials are configured
+- Agent runner dependencies are installed (`cd container/agent-runner && npm install`)
 
 **What changes will be accepted into the codebase?**
 
