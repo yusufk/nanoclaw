@@ -6,7 +6,7 @@
 
 import fs from 'fs';
 import path from 'path';
-import { OpenAIClient, AzureKeyCredential } from '@azure/openai';
+import OpenAI from 'openai';
 import { createIpcMcp } from './ipc-mcp.js';
 
 interface ContainerInput {
@@ -100,10 +100,12 @@ async function main(): Promise<void> {
   }
 
   try {
-    const client = new OpenAIClient(
-      endpoint,
-      new AzureKeyCredential(apiKey)
-    );
+    const client = new OpenAI({
+      apiKey,
+      baseURL: `${endpoint}/openai/deployments/${deploymentName}`,
+      defaultQuery: { 'api-version': process.env.AZURE_API_VERSION || '2024-08-01-preview' },
+      defaultHeaders: { 'api-key': apiKey }
+    });
 
     const systemPrompt = loadSystemPrompt();
     const userPrompt = input.isScheduledTask 
@@ -112,17 +114,15 @@ async function main(): Promise<void> {
 
     log('Calling Azure OpenAI...');
 
-    const completion = await client.getChatCompletions(
-      deploymentName,
-      [
+    const completion = await client.chat.completions.create({
+      model: deploymentName,
+      messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt }
       ],
-      {
-        temperature: parseFloat(process.env.TEMPERATURE || '0.7'),
-        maxTokens: 4000
-      }
-    );
+      temperature: parseFloat(process.env.TEMPERATURE || '0.7'),
+      max_tokens: 4000
+    });
     
     const assistantMessage = completion.choices[0]?.message?.content || 'No response';
     

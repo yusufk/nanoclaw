@@ -1,36 +1,25 @@
 /**
- * Container Runner for NanoClaw
- * Spawns agent execution in Docker container and handles IPC
+ * Process Runner for NanoClaw
+ * Spawns agent execution in child process and handles IPC
  */
-import { ChildProcess, exec, spawn } from 'child_process';
+import { ChildProcess, spawn } from 'child_process';
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
 
 import {
-  CONTAINER_IMAGE,
-  CONTAINER_MAX_OUTPUT_SIZE,
   CONTAINER_TIMEOUT,
   DATA_DIR,
   GROUPS_DIR,
 } from './config.js';
 import { logger } from './logger.js';
-import { validateAdditionalMounts } from './mount-security.js';
 import { RegisteredGroup } from './types.js';
 
 // Sentinel markers for robust output parsing (must match agent-runner)
 const OUTPUT_START_MARKER = '---NANOCLAW_OUTPUT_START---';
 const OUTPUT_END_MARKER = '---NANOCLAW_OUTPUT_END---';
 
-function getHomeDir(): string {
-  const home = process.env.HOME || os.homedir();
-  if (!home) {
-    throw new Error(
-      'Unable to determine home directory: HOME environment variable is not set and os.homedir() returned empty',
-    );
-  }
-  return home;
-}
+// Max output size per stream (1MB)
+const MAX_OUTPUT_SIZE = 1024 * 1024;
 
 export interface ContainerInput {
   prompt: string;
@@ -53,231 +42,119 @@ export interface ContainerOutput {
   error?: string;
 }
 
-interface VolumeMount {
-  hostPath: string;
-  containerPath: string;
-  readonly: boolean;
-}
+/**
+ * Prepare environment variables for agent process
+ */
+function buildAgentEnv(group: RegisteredGroup): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    NODE_ENV: 'production',
+  };
 
-function buildVolumeMounts(
-  group: RegisteredGroup,
-  isMain: boolean,
-): VolumeMount[] {
-  const mounts: VolumeMount[] = [];
-  const homeDir = getHomeDir();
-  const projectRoot = process.cwd();
+  // Pass through Azure OpenAI credentials
+  const allowedVars = [
+    'AZURE_ENDPOINT',
+    'AZURE_API_KEY',
+    'AZURE_API_VERSION',
+    'AZURE_DEPLOYMENT_NAME',
+    'TEMPERATURE',
+    'GOOGLE_API_KEY',
+    'GOOGLE_SEARCH_ENGINE_ID',
+  ];
 
-  if (isMain) {
-    // Main gets the entire project root mounted
-    mounts.push({
-      hostPath: projectRoot,
-      containerPath: '/workspace/project',
-      readonly: false,
-    });
-
-    // Main also gets its group folder as the working directory
-    mounts.push({
-      hostPath: path.join(GROUPS_DIR, group.folder),
-      containerPath: '/workspace/group',
-      readonly: false,
-    });
-  } else {
-    // Other groups only get their own folder
-    mounts.push({
-      hostPath: path.join(GROUPS_DIR, group.folder),
-      containerPath: '/workspace/group',
-      readonly: false,
-    });
-
-    // Global memory directory (read-only for non-main)
-    // Docker bind mounts work with both files and directories
-    const globalDir = path.join(GROUPS_DIR, 'global');
-    if (fs.existsSync(globalDir)) {
-      mounts.push({
-        hostPath: globalDir,
-        containerPath: '/workspace/global',
-        readonly: true,
-      });
+  for (const varName of allowedVars) {
+    if (process.env[varName]) {
+      env[varName] = process.env[varName];
     }
   }
 
-  // Per-group Claude sessions directory (isolated from other groups)
-  // Each group gets their own .claude/ to prevent cross-group session access
-  const groupSessionsDir = path.join(
-    DATA_DIR,
-    'sessions',
-    group.folder,
-    '.claude',
-  );
-  fs.mkdirSync(groupSessionsDir, { recursive: true });
-  mounts.push({
-    hostPath: groupSessionsDir,
-    containerPath: '/home/node/.claude',
-    readonly: false,
-  });
-
-  // Per-group IPC namespace: each group gets its own IPC directory
-  // This prevents cross-group privilege escalation via IPC
-  const groupIpcDir = path.join(DATA_DIR, 'ipc', group.folder);
-  fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
-  fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
-  mounts.push({
-    hostPath: groupIpcDir,
-    containerPath: '/workspace/ipc',
-    readonly: false,
-  });
-
-  // Environment file directory (keeps credentials out of process listings)
-  // Only expose specific auth variables needed by Azure OpenAI, not the entire .env
-  const envDir = path.join(DATA_DIR, 'env');
-  fs.mkdirSync(envDir, { recursive: true });
-  const envFile = path.join(projectRoot, '.env');
-  if (fs.existsSync(envFile)) {
-    const envContent = fs.readFileSync(envFile, 'utf-8');
-    const allowedVars = [
-      'AZURE_ENDPOINT',
-      'AZURE_API_KEY',
-      'AZURE_API_VERSION',
-      'AZURE_DEPLOYMENT_NAME',
-      'TEMPERATURE',
-      'GOOGLE_API_KEY',
-      'GOOGLE_SEARCH_ENGINE_ID',
-    ];
-    const filteredLines = envContent.split('\n').filter((line) => {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) return false;
-      return allowedVars.some((v) => trimmed.startsWith(`${v}=`));
-    });
-
-    if (filteredLines.length > 0) {
-      fs.writeFileSync(
-        path.join(envDir, 'env'),
-        filteredLines.join('\n') + '\n',
-      );
-      mounts.push({
-        hostPath: envDir,
-        containerPath: '/workspace/env-dir',
-        readonly: true,
-      });
-    }
-  }
-
-  // Additional mounts validated against external allowlist (tamper-proof from containers)
-  if (group.containerConfig?.additionalMounts) {
-    const validatedMounts = validateAdditionalMounts(
-      group.containerConfig.additionalMounts,
-      group.name,
-      isMain,
-    );
-    mounts.push(...validatedMounts);
-  }
-
-  return mounts;
-}
-
-function buildContainerArgs(mounts: VolumeMount[], containerName: string): string[] {
-  const args: string[] = ['run', '-i', '--rm', '--name', containerName];
-
-  // Docker: -v with :ro suffix for readonly
-  for (const mount of mounts) {
-    if (mount.readonly) {
-      args.push('-v', `${mount.hostPath}:${mount.containerPath}:ro`);
-    } else {
-      args.push('-v', `${mount.hostPath}:${mount.containerPath}`);
-    }
-  }
-
-  args.push(CONTAINER_IMAGE);
-
-  return args;
+  return env;
 }
 
 export async function runContainerAgent(
   group: RegisteredGroup,
   input: ContainerInput,
-  onProcess: (proc: ChildProcess, containerName: string) => void,
+  onProcess: (proc: ChildProcess, processId: string) => void,
 ): Promise<ContainerOutput> {
   const startTime = Date.now();
 
   const groupDir = path.join(GROUPS_DIR, group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  const mounts = buildVolumeMounts(group, input.isMain);
-  const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
-  const containerName = `nanoclaw-${safeName}-${Date.now()}`;
-  const containerArgs = buildContainerArgs(mounts, containerName);
+  // Ensure IPC and sessions directories exist
+  const groupIpcDir = path.join(DATA_DIR, 'ipc', group.folder);
+  fs.mkdirSync(path.join(groupIpcDir, 'messages'), { recursive: true });
+  fs.mkdirSync(path.join(groupIpcDir, 'tasks'), { recursive: true });
 
-  logger.debug(
-    {
-      group: group.name,
-      containerName,
-      mounts: mounts.map(
-        (m) =>
-          `${m.hostPath} -> ${m.containerPath}${m.readonly ? ' (ro)' : ''}`,
-      ),
-      containerArgs: containerArgs.join(' '),
-    },
-    'Container mount configuration',
-  );
+  const groupSessionsDir = path.join(DATA_DIR, 'sessions', group.folder, '.claude');
+  fs.mkdirSync(groupSessionsDir, { recursive: true });
+
+  const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
+  const processId = `nanoclaw-${safeName}-${Date.now()}`;
+  
+  const agentPath = path.join(process.cwd(), 'container/agent-runner/dist/index.js');
+  const env = buildAgentEnv(group);
 
   logger.info(
     {
       group: group.name,
-      containerName,
-      mountCount: mounts.length,
+      processId,
       isMain: input.isMain,
+      agentPath,
     },
-    'Spawning container agent',
+    'Spawning agent process',
   );
 
   const logsDir = path.join(GROUPS_DIR, group.folder, 'logs');
   fs.mkdirSync(logsDir, { recursive: true });
 
   return new Promise((resolve) => {
-    const container = spawn('docker', containerArgs, {
+    const agentProcess = spawn('node', [agentPath], {
       stdio: ['pipe', 'pipe', 'pipe'],
+      cwd: groupDir,
+      env,
     });
 
-    onProcess(container, containerName);
+    onProcess(agentProcess, processId);
 
     let stdout = '';
     let stderr = '';
     let stdoutTruncated = false;
     let stderrTruncated = false;
 
-    container.stdin.write(JSON.stringify(input));
-    container.stdin.end();
+    agentProcess.stdin.write(JSON.stringify(input));
+    agentProcess.stdin.end();
 
-    container.stdout.on('data', (data) => {
+    agentProcess.stdout.on('data', (data) => {
       if (stdoutTruncated) return;
       const chunk = data.toString();
-      const remaining = CONTAINER_MAX_OUTPUT_SIZE - stdout.length;
+      const remaining = MAX_OUTPUT_SIZE - stdout.length;
       if (chunk.length > remaining) {
         stdout += chunk.slice(0, remaining);
         stdoutTruncated = true;
         logger.warn(
           { group: group.name, size: stdout.length },
-          'Container stdout truncated due to size limit',
+          'Agent stdout truncated due to size limit',
         );
       } else {
         stdout += chunk;
       }
     });
 
-    container.stderr.on('data', (data) => {
+    agentProcess.stderr.on('data', (data) => {
       const chunk = data.toString();
       const lines = chunk.trim().split('\n');
       for (const line of lines) {
-        if (line) logger.debug({ container: group.folder }, line);
+        if (line) logger.debug({ process: group.folder }, line);
       }
       if (stderrTruncated) return;
-      const remaining = CONTAINER_MAX_OUTPUT_SIZE - stderr.length;
+      const remaining = MAX_OUTPUT_SIZE - stderr.length;
       if (chunk.length > remaining) {
         stderr += chunk.slice(0, remaining);
         stderrTruncated = true;
         logger.warn(
           { group: group.name, size: stderr.length },
-          'Container stderr truncated due to size limit',
+          'Agent stderr truncated due to size limit',
         );
       } else {
         stderr += chunk;
@@ -288,52 +165,51 @@ export async function runContainerAgent(
 
     const timeout = setTimeout(() => {
       timedOut = true;
-      logger.error({ group: group.name, containerName }, 'Container timeout, stopping gracefully');
-      // Graceful stop: sends SIGTERM, waits, then SIGKILL — lets --rm fire
-      exec(`docker stop ${containerName}`, { timeout: 15000 }, (err) => {
-        if (err) {
-          logger.warn({ group: group.name, containerName, err }, 'Graceful stop failed, force killing');
-          container.kill('SIGKILL');
+      logger.error({ group: group.name, processId }, 'Agent process timeout, killing');
+      agentProcess.kill('SIGTERM');
+      setTimeout(() => {
+        if (!agentProcess.killed) {
+          agentProcess.kill('SIGKILL');
         }
-      });
+      }, 5000);
     }, group.containerConfig?.timeout || CONTAINER_TIMEOUT);
 
-    container.on('close', (code) => {
+    agentProcess.on('close', (code) => {
       clearTimeout(timeout);
       const duration = Date.now() - startTime;
 
       if (timedOut) {
         const ts = new Date().toISOString().replace(/[:.]/g, '-');
-        const timeoutLog = path.join(logsDir, `container-${ts}.log`);
+        const timeoutLog = path.join(logsDir, `agent-${ts}.log`);
         fs.writeFileSync(timeoutLog, [
-          `=== Container Run Log (TIMEOUT) ===`,
+          `=== Agent Process Log (TIMEOUT) ===`,
           `Timestamp: ${new Date().toISOString()}`,
           `Group: ${group.name}`,
-          `Container: ${containerName}`,
+          `Process ID: ${processId}`,
           `Duration: ${duration}ms`,
           `Exit Code: ${code}`,
         ].join('\n'));
 
         logger.error(
-          { group: group.name, containerName, duration, code },
-          'Container timed out',
+          { group: group.name, processId, duration, code },
+          'Agent process timed out',
         );
 
         resolve({
           status: 'error',
           result: null,
-          error: `Container timed out after ${group.containerConfig?.timeout || CONTAINER_TIMEOUT}ms`,
+          error: `Agent timed out after ${group.containerConfig?.timeout || CONTAINER_TIMEOUT}ms`,
         });
         return;
       }
 
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-      const logFile = path.join(logsDir, `container-${timestamp}.log`);
+      const logFile = path.join(logsDir, `agent-${timestamp}.log`);
       const isVerbose =
         process.env.LOG_LEVEL === 'debug' || process.env.LOG_LEVEL === 'trace';
 
       const logLines = [
-        `=== Container Run Log ===`,
+        `=== Agent Process Log ===`,
         `Timestamp: ${new Date().toISOString()}`,
         `Group: ${group.name}`,
         `IsMain: ${input.isMain}`,
@@ -351,16 +227,8 @@ export async function runContainerAgent(
           `=== Input ===`,
           JSON.stringify(input, null, 2),
           ``,
-          `=== Container Args ===`,
-          containerArgs.join(' '),
-          ``,
-          `=== Mounts ===`,
-          mounts
-            .map(
-              (m) =>
-                `${m.hostPath} -> ${m.containerPath}${m.readonly ? ' (ro)' : ''}`,
-            )
-            .join('\n'),
+          `=== Working Directory ===`,
+          groupDir,
           ``,
           `=== Stderr${stderrTruncated ? ' (TRUNCATED)' : ''} ===`,
           stderr,
@@ -374,16 +242,11 @@ export async function runContainerAgent(
           `Prompt length: ${input.prompt.length} chars`,
           `Session ID: ${input.sessionId || 'new'}`,
           ``,
-          `=== Mounts ===`,
-          mounts
-            .map((m) => `${m.containerPath}${m.readonly ? ' (ro)' : ''}`)
-            .join('\n'),
-          ``,
         );
       }
 
       fs.writeFileSync(logFile, logLines.join('\n'));
-      logger.debug({ logFile, verbose: isVerbose }, 'Container log written');
+      logger.debug({ logFile, verbose: isVerbose }, 'Agent log written');
 
       if (code !== 0) {
         logger.error(
@@ -395,13 +258,13 @@ export async function runContainerAgent(
             stdout,
             logFile,
           },
-          'Container exited with error',
+          'Agent process exited with error',
         );
 
         resolve({
           status: 'error',
           result: null,
-          error: `Container exited with code ${code}: ${stderr.slice(-200)}`,
+          error: `Agent exited with code ${code}: ${stderr.slice(-200)}`,
         });
         return;
       }
@@ -431,7 +294,7 @@ export async function runContainerAgent(
             status: output.status,
             hasResult: !!output.result,
           },
-          'Container completed',
+          'Agent process completed',
         );
 
         resolve(output);
@@ -443,24 +306,24 @@ export async function runContainerAgent(
             stderr,
             error: err,
           },
-          'Failed to parse container output',
+          'Failed to parse agent output',
         );
 
         resolve({
           status: 'error',
           result: null,
-          error: `Failed to parse container output: ${err instanceof Error ? err.message : String(err)}`,
+          error: `Failed to parse agent output: ${err instanceof Error ? err.message : String(err)}`,
         });
       }
     });
 
-    container.on('error', (err) => {
+    agentProcess.on('error', (err) => {
       clearTimeout(timeout);
-      logger.error({ group: group.name, containerName, error: err }, 'Container spawn error');
+      logger.error({ group: group.name, processId, error: err }, 'Agent spawn error');
       resolve({
         status: 'error',
         result: null,
-        error: `Container spawn error: ${err.message}`,
+        error: `Agent spawn error: ${err.message}`,
       });
     });
   });

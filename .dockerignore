@@ -1,0 +1,10 @@
+node_modules
+dist
+.git
+.env
+store
+data
+container/agent-runner/node_modules
+container/agent-runner/dist
+*.log
+.DS_Store

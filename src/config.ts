@@ -14,9 +14,9 @@ export const SCHEDULER_POLL_INTERVAL = 60000;
 
 // Telegram Configuration
 export const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || '';
-export const TELEGRAM_WHITELIST = process.env.WHITE_LIST
-  ? process.env.WHITE_LIST.split(',').map((id) => parseInt(id.trim(), 10))
-  : [];
+export const BOTMASTER_ID = process.env.BOTMASTER_ID
+  ? parseInt(process.env.BOTMASTER_ID, 10)
+  : 0;
 
 // Azure OpenAI Configuration
 export const AZURE_ENDPOINT = process.env.AZURE_ENDPOINT || '';

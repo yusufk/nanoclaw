@@ -670,6 +670,18 @@ async function connectTelegram(): Promise<void> {
     // Store chat metadata for group discovery
     storeChatMetadata(chatJid, timestamp, telegramMsg.chatName);
 
+    // Auto-register botmaster's first chat as "main" if no groups registered
+    if (Object.keys(registeredGroups).length === 0 && telegramMsg.chatType === 'private') {
+      logger.info({ chatJid, name: telegramMsg.chatName }, 'Auto-registering botmaster chat as main');
+      registerGroup(chatJid, {
+        name: telegramMsg.chatName,
+        folder: MAIN_GROUP_FOLDER,
+        trigger: `@${ASSISTANT_NAME}`,
+        added_at: timestamp,
+        requiresTrigger: false,
+      });
+    }
+
     // Only store full message content for registered groups
     if (registeredGroups[chatJid]) {
       // Store message in database
@@ -784,60 +796,7 @@ function recoverPendingMessages(): void {
   }
 }
 
-function ensureContainerSystemRunning(): void {
-  try {
-    execSync('docker info', { stdio: 'pipe' });
-    logger.debug('Docker is running');
-  } catch {
-    logger.error('Docker is not running or not accessible');
-    console.error(
-      '\n╔════════════════════════════════════════════════════════════════╗',
-    );
-    console.error(
-      '║  FATAL: Docker is not running                                  ║',
-    );
-    console.error(
-      '║                                                                ║',
-    );
-    console.error(
-      '║  Agents cannot run without Docker. To fix:                    ║',
-    );
-    console.error(
-      '║  1. Install from: https://docker.com/products/docker-desktop  ║',
-    );
-    console.error(
-      '║  2. Start Docker Desktop                                      ║',
-    );
-    console.error(
-      '║  3. Restart Jarvis                                            ║',
-    );
-    console.error(
-      '╚════════════════════════════════════════════════════════════════╝\n',
-    );
-    throw new Error('Docker is required but not running');
-  }
-
-  // Clean up stopped Jarvis containers from previous runs
-  try {
-    const output = execSync('docker ps -a --format {{.Names}}', {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      encoding: 'utf-8',
-    });
-    const stale = output
-      .split('\n')
-      .map((n) => n.trim())
-      .filter((n) => n.startsWith('nanoclaw-'));
-    if (stale.length > 0) {
-      execSync(`docker rm ${stale.join(' ')}`, { stdio: 'pipe' });
-      logger.info({ count: stale.length }, 'Cleaned up stopped containers');
-    }
-  } catch {
-    // No stopped containers or ls/rm not supported
-  }
-}
-
 async function main(): Promise<void> {
-  ensureContainerSystemRunning();
   initDatabase();
   logger.info('Database initialized');
   loadState();

@@ -3,7 +3,7 @@
  * Manages Telegram bot lifecycle, message handling, and group tracking
  */
 import TelegramBot from 'node-telegram-bot-api';
-import { ASSISTANT_NAME, TELEGRAM_TOKEN, TELEGRAM_WHITELIST } from './config.js';
+import { ASSISTANT_NAME, TELEGRAM_TOKEN, BOTMASTER_ID } from './config.js';
 import { logger } from './logger.js';
 
 let bot: TelegramBot | null = null;
@@ -53,16 +53,15 @@ export function initTelegramBot(): TelegramBot | null {
 }
 
 /**
- * Check if user is whitelisted.
+ * Check if user is the botmaster.
  */
-function isWhitelisted(userId: number): boolean {
-  // If no whitelist configured, allow all (open mode)
-  if (TELEGRAM_WHITELIST.length === 0) {
-    logger.warn('No whitelist configured, allowing all users');
-    return true;
+function isBotmaster(userId: number): boolean {
+  if (!BOTMASTER_ID) {
+    logger.error('BOTMASTER_ID not configured');
+    return false;
   }
 
-  return TELEGRAM_WHITELIST.includes(userId);
+  return userId === BOTMASTER_ID;
 }
 
 /**
@@ -80,17 +79,13 @@ export async function startTelegramBot(onMessage: TelegramMessageListener): Prom
     // Only process text messages
     if (!msg.text) return;
 
-    // Check whitelist
-    if (!isWhitelisted(msg.from?.id || 0)) {
+    // Check if user is botmaster
+    if (!isBotmaster(msg.from?.id || 0)) {
       logger.warn(
         { userId: msg.from?.id, username: msg.from?.username },
         'Unauthorized user attempted to use bot',
       );
-      await bot?.sendMessage(
-        msg.chat.id,
-        '❌ Unauthorized. This bot is private.',
-      );
-      return;
+      return; // Silently ignore non-botmaster messages
     }
 
     const chatType = msg.chat.type;
@@ -151,7 +146,7 @@ export async function startTelegramBot(onMessage: TelegramMessageListener): Prom
 
   // Handle bot commands
   bot.onText(/\/start/, async (msg) => {
-    if (!isWhitelisted(msg.from?.id || 0)) return;
+    if (!isBotmaster(msg.from?.id || 0)) return;
 
     const greeting = `👋 Hello! I'm ${ASSISTANT_NAME}.
 
@@ -169,7 +164,7 @@ I'm your personal AI assistant running on NanoClaw.
   });
 
   bot.onText(/\/help/, async (msg) => {
-    if (!isWhitelisted(msg.from?.id || 0)) return;
+    if (!isBotmaster(msg.from?.id || 0)) return;
 
     const help = `**${ASSISTANT_NAME} Commands:**
 
@@ -189,7 +184,7 @@ Mention me with @${ASSISTANT_NAME} followed by your request.
   });
 
   bot.onText(/\/status/, async (msg) => {
-    if (!isWhitelisted(msg.from?.id || 0)) return;
+    if (!isBotmaster(msg.from?.id || 0)) return;
 
     const status = `✅ **${ASSISTANT_NAME} Status**
 
@@ -197,7 +192,7 @@ Bot is running and ready to assist.
 
 **Configuration:**
 - Polling: Active
-- Whitelist: ${TELEGRAM_WHITELIST.length > 0 ? `${TELEGRAM_WHITELIST.length} users` : 'Open (no whitelist)'}
+- Botmaster: ${BOTMASTER_ID}
 - Chat Type: ${msg.chat.type}`;
 
     await bot?.sendMessage(msg.chat.id, status, { parse_mode: 'Markdown' });

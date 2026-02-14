@@ -1,0 +1,19 @@
+# Agent containers only - bot router runs on host for security
+version: '3.8'
+
+services:
+  # Agent container definition (spawned dynamically by bot)
+  agent:
+    image: nanoclaw-agent:latest
+    profiles:
+      - manual  # Don't start automatically
+    stdin_open: true
+    tty: false
+    environment:
+      - AZURE_ENDPOINT=${AZURE_ENDPOINT}
+      - AZURE_API_KEY=${AZURE_API_KEY}
+      - AZURE_DEPLOYMENT_NAME=${AZURE_DEPLOYMENT_NAME}
+
+networks:
+  nanoclaw-network:
+    driver: bridge
